@@ -67,6 +67,22 @@ module Danger
       @skip_gradle_task ||= false
     end
 
+    # Custom multiple gradle module to run.
+    # Defaults to [nil].
+    # @return [Array]
+    attr_writer :gradle_modules
+    def gradle_modules
+      return @gradle_modules ||= Array.new
+    end
+
+    # Custom gradle project directory.
+    # Defaults is repository's root directory.
+    # @return [String]
+    attr_accessor :gradle_project
+    def gradle_project
+      return @gradle_project ||= ''
+    end
+
     # Defines the severity level of the execution.
     # Selected levels are the chosen one and up.
     # Possible values are "Warning", "Error" or "Fatal".
@@ -94,17 +110,43 @@ module Danger
       unless skip_gradle_task
         return fail("Could not find `gradlew` inside current directory") unless gradlew_exists?
       end
+      if gradle_modules.empty?
+        lint_execute(inline_mode)
+      else
+        gradle_modules.each_with_index{ |gradle_module, index|
+            task = gradle_task
+            file = report_file
+            @gradle_task = gradle_module + ":" + task
+            @report_file = gradle_module + "/" + file
 
+            lint_execute(inline_mode)
+
+            @gradle_task = task
+            @report_file = file
+        }
+      end
+    end
+
+    def lint_execute(inline_mode)
       unless SEVERITY_LEVELS.include?(severity)
         fail("'#{severity}' is not a valid value for `severity` parameter.")
         return
+      end
+
+      if gradle_project != ''
+        "export DANGER_TMP=$PWD"
+        "cd #{gradle_project}"
       end
 
       unless skip_gradle_task
         system "./gradlew #{gradle_task}"
       end
 
-      unless File.exists?(report_file)
+      if gradle_project != ''
+        "cd DANGER_TMP"
+      end
+
+      unless File.exists?("#{gradle_project}#{report_file}")
         fail("Lint report not found at `#{report_file}`. "\
           "Have you forgot to add `xmlReport true` to your `build.gradle` file?")
       end
@@ -128,7 +170,7 @@ module Danger
     private
 
     def read_issues_from_report
-      file = File.open(report_file)
+      file = File.open("#{gradle_project}#{report_file}")
 
       require 'oga'
       report = Oga.parse_xml(file)
@@ -203,7 +245,7 @@ module Danger
     end
 
     def gradlew_exists?
-      `ls gradlew`.strip.empty? == false
+      `ls #{gradle_project}gradlew`.strip.empty? == false
     end
   end
 end
